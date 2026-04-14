@@ -1,0 +1,43 @@
+# InvenTree Reverse Proxy Configuration
+# Serves the InvenTree web interface and handles static/media files
+
+:80 {
+    log {
+        output file /var/log/caddy/inventree.access.log
+    }
+
+    request_body {
+        max_size 100MB
+    }
+
+    encode gzip
+
+    # Static files
+    handle /static/* {
+        header {
+            Access-Control-Allow-Origin *
+            Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+        }
+        root * /var/www
+        file_server
+    }
+
+    # Media files (with auth check)
+    handle /media/* {
+        header {
+            Content-Disposition attachment
+            Access-Control-Allow-Origin *
+            Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+        }
+        forward_auth inventree-server:8000 {
+            uri /auth/
+        }
+        root * /var/www
+        file_server
+    }
+
+    # All other requests -> InvenTree
+    handle {
+        reverse_proxy inventree-server:8000
+    }
+}

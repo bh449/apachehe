@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# InvenTree data (Docker volumes)
+inventree/inventree-data/
+
+# Node
+node_modules/
+.next/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/

@@ -1,0 +1,54 @@
+# ============================================================
+# InvenTree Mini ERP + WMS - Environment Configuration
+# ============================================================
+# To use:
+#   cp env-template.txt .env
+#   Then edit .env and change the passwords
+# ============================================================
+
+# --- Project ---
+COMPOSE_PROJECT_NAME=mini-erp
+
+# --- InvenTree Version ---
+# Use "stable" for production, "latest" for bleeding edge
+INVENTREE_TAG=stable
+
+# --- Site URL ---
+# Change to your actual domain/IP in production
+INVENTREE_SITE_URL=http://localhost:1880
+
+# --- Ports ---
+INVENTREE_HTTP_PORT=1880
+INVENTREE_HTTPS_PORT=1443
+INVENTREE_WEB_PORT=8000
+
+# --- Database ---
+INVENTREE_DB_ENGINE=postgresql
+INVENTREE_DB_NAME=inventree
+INVENTREE_DB_HOST=inventree-db
+INVENTREE_DB_PORT=5432
+INVENTREE_DB_USER=pguser
+INVENTREE_DB_PASSWORD=CHANGE_ME_to_a_strong_password
+
+# --- Cache ---
+INVENTREE_CACHE_ENABLED=True
+INVENTREE_CACHE_HOST=inventree-cache
+INVENTREE_CACHE_PORT=6379
+
+# --- Admin Account (created on first run) ---
+INVENTREE_ADMIN_USER=admin
+INVENTREE_ADMIN_PASSWORD=CHANGE_ME_admin_password
+INVENTREE_ADMIN_EMAIL=admin@example.com
+
+# --- Features ---
+INVENTREE_PLUGINS_ENABLED=True
+INVENTREE_AUTO_UPDATE=True
+INVENTREE_LOG_LEVEL=WARNING
+
+# --- Proxy Headers ---
+INVENTREE_USE_X_FORWARDED_HOST=True
+INVENTREE_USE_X_FORWARDED_PORT=True
+INVENTREE_USE_X_FORWARDED_PROTO=True
+
+# --- Gunicorn ---
+INVENTREE_GUNICORN_TIMEOUT=90
