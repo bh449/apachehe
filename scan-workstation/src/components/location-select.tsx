@@ -32,8 +32,9 @@ export function LocationSelect({ value, onChange, label }: LocationSelectProps) 
     <div data-no-refocus>
       {label && <label className="text-sm text-muted-foreground mb-1 block">{label}</label>}
       <Select
-        value={value?.toString()}
+        value={value !== undefined ? value.toString() : ""}
         onValueChange={(val) => {
+          if (!val) return;
           const loc = locations.find((l) => l.pk === Number(val));
           if (loc) onChange(loc);
         }}
