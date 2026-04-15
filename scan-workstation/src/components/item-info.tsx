@@ -71,9 +71,17 @@ export function ItemInfo({ part, stock, location, loading }: ItemInfoProps) {
         <div className="text-sm space-y-1">
           <span className="text-muted-foreground">库存分布:</span>
           <div className="flex flex-wrap gap-1 mt-1">
-            {stock.map((s) => (
-              <Badge key={s.pk} variant="outline" className="text-xs">
-                {s.location_detail?.pathstring || s.location_detail?.name || "未知"}: {s.quantity}
+            {Object.values(
+              stock.reduce<Record<string, { name: string; qty: number }>>((acc, s) => {
+                const key = s.location?.toString() ?? "unallocated";
+                const name = s.location_detail?.pathstring || s.location_detail?.name || "未分配";
+                if (!acc[key]) acc[key] = { name, qty: 0 };
+                acc[key].qty += s.quantity;
+                return acc;
+              }, {})
+            ).map(({ name, qty }) => (
+              <Badge key={name} variant="outline" className="text-xs">
+                {name}: {qty}
               </Badge>
             ))}
           </div>
