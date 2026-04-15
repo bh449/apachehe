@@ -6,14 +6,32 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScanInput } from "./scan-input";
 import { LocationSelect } from "./location-select";
 import { scanBarcode, createStockItem, getStockForPart, addStock } from "@/lib/api";
 import { playSuccess, playError, playScanAck } from "@/lib/sounds";
-import type { Part, StockLocation, ScanLineItem, FlashMessage } from "@/lib/types";
+import type { Part, StockItem, StockLocation, ScanLineItem, FlashMessage } from "@/lib/types";
 
 interface ModeInboundProps {
   onFlash: (msg: FlashMessage) => void;
+}
+
+// Represents a pending inbound item that needs a merge decision
+interface MergeCandidate {
+  lineItem: ScanLineItem;
+  existingStock: StockItem[];
+  // resolve() is called when the user makes a choice
+  resolve: (shouldMerge: boolean) => void;
 }
 
 export function ModeInbound({ onFlash }: ModeInboundProps) {
@@ -22,9 +40,11 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
   const [submitting, setSubmitting] = useState(false);
   const [lastPart, setLastPart] = useState<Part | null>(null);
 
+  // Dialog state
+  const [mergeCandidate, setMergeCandidate] = useState<MergeCandidate | null>(null);
+
   async function handleScan(barcode: string) {
     try {
-      // Check if it's a location barcode
       const result = await scanBarcode(barcode);
 
       if (result.stocklocation) {
@@ -35,12 +55,8 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
       }
 
       let part: Part | null = null;
-
-      if (result.part) {
-        part = result.part;
-      } else if (result.stockitem?.part_detail) {
-        part = result.stockitem.part_detail;
-      }
+      if (result.part) part = result.part;
+      else if (result.stockitem?.part_detail) part = result.stockitem.part_detail;
 
       if (!part) {
         playError();
@@ -50,14 +66,11 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
 
       setLastPart(part);
 
-      // Check if already in list, increment quantity
       const existing = items.find((i) => i.part.pk === part!.pk);
       if (existing) {
-        setItems(
-          items.map((i) =>
-            i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
-          )
-        );
+        setItems(items.map((i) =>
+          i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
+        ));
         playScanAck();
         onFlash({ type: "success", text: `${part.name} +1 (共 ${existing.quantity + 1})` });
       } else {
@@ -73,10 +86,7 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
       }
     } catch (err) {
       playError();
-      onFlash({
-        type: "error",
-        text: err instanceof Error ? err.message : "扫码失败",
-      });
+      onFlash({ type: "error", text: err instanceof Error ? err.message : "扫码失败" });
     }
   }
 
@@ -88,8 +98,18 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
     }
   }
 
-  function removeItem(id: string) {
-    setItems(items.filter((i) => i.id !== id));
+  // Show merge dialog and wait for user's decision
+  function askMerge(lineItem: ScanLineItem, existingStock: StockItem[]): Promise<boolean> {
+    return new Promise((resolve) => {
+      setMergeCandidate({ lineItem, existingStock, resolve });
+    });
+  }
+
+  function handleMergeChoice(shouldMerge: boolean) {
+    if (mergeCandidate) {
+      mergeCandidate.resolve(shouldMerge);
+      setMergeCandidate(null);
+    }
   }
 
   async function handleSubmit() {
@@ -106,12 +126,21 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
 
     setSubmitting(true);
     try {
-      // For each item, check if stock exists at location, if so add, else create
       for (const item of items) {
         const existingStock = await getStockForPart(item.part.pk, location.pk);
-        if (existingStock.length > 0) {
+        const hasExisting = existingStock.length > 0;
+
+        let shouldMerge = false;
+        if (hasExisting) {
+          // Pause and ask the user
+          shouldMerge = await askMerge(item, existingStock);
+        }
+
+        if (hasExisting && shouldMerge) {
+          // Add quantity to the first existing stock item at this location
           await addStock([{ pk: existingStock[0].pk, quantity: item.quantity }]);
         } else {
+          // Create a new stock item (even if one already exists)
           await createStockItem({
             part: item.part.pk,
             location: location.pk,
@@ -129,17 +158,40 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
       setLastPart(null);
     } catch (err) {
       playError();
-      onFlash({
-        type: "error",
-        text: err instanceof Error ? err.message : "入库失败",
-      });
+      onFlash({ type: "error", text: err instanceof Error ? err.message : "入库失败" });
     } finally {
       setSubmitting(false);
     }
   }
 
+  // Compute existing total for the dialog
+  const existingTotal = mergeCandidate?.existingStock.reduce((s, i) => s + i.quantity, 0) ?? 0;
+
   return (
     <div className="space-y-4">
+      {/* Merge confirmation dialog */}
+      <AlertDialog open={!!mergeCandidate}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>发现已有库存</AlertDialogTitle>
+            <AlertDialogDescription>
+              {mergeCandidate?.lineItem.part.name} 在 {location?.name} 已有{" "}
+              {existingTotal} 件库存，本次入库 {mergeCandidate?.lineItem.quantity} 件。
+              选「合并」将叠加到现有库存（共 {existingTotal + (mergeCandidate?.lineItem.quantity ?? 0)} 件），
+              选「新建」将创建独立库存条目。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => handleMergeChoice(false)}>
+              新建独立
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleMergeChoice(true)}>
+              合并入库
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <LocationSelect
         value={location?.pk}
         onChange={setLocation}
@@ -183,12 +235,8 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
                   className="flex items-center gap-2 py-2 border-b last:border-0"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">
-                      {item.part.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      {item.part.IPN}
-                    </div>
+                    <div className="font-medium text-sm truncate">{item.part.name}</div>
+                    <div className="text-xs text-muted-foreground font-mono">{item.part.IPN}</div>
                   </div>
                   <div className="flex items-center gap-1" data-no-refocus>
                     <Button
@@ -202,9 +250,7 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
                     <Input
                       type="number"
                       value={item.quantity}
-                      onChange={(e) =>
-                        updateQuantity(item.id, Number(e.target.value))
-                      }
+                      onChange={(e) => updateQuantity(item.id, Number(e.target.value))}
                       className="h-8 w-16 text-center"
                       min={1}
                     />
@@ -222,7 +268,7 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
                     variant="ghost"
                     size="sm"
                     className="h-8 w-8 p-0 text-destructive"
-                    onClick={() => removeItem(item.id)}
+                    onClick={() => setItems(items.filter((i) => i.id !== item.id))}
                   >
                     x
                   </Button>
@@ -236,7 +282,7 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
               disabled={submitting || !location}
             >
               {submitting
-                ? "提交中..."
+                ? "处理中..."
                 : `确认入库 (${items.reduce((s, i) => s + i.quantity, 0)} 件)`}
             </Button>
           </CardContent>
