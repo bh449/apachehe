@@ -5,6 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScanInput } from "./scan-input";
 import { LocationSelect } from "./location-select";
 import { scanBarcode, getStockForPart, transferStock } from "@/lib/api";
@@ -23,12 +33,19 @@ interface ModeTransferProps {
   onFlash: (msg: FlashMessage) => void;
 }
 
+interface DuplicateWarning {
+  item: TransferItem;
+  existingQty: number;
+  resolve: (proceed: boolean) => void;
+}
+
 export function ModeTransfer({ onFlash }: ModeTransferProps) {
   const [fromLocation, setFromLocation] = useState<StockLocation | null>(null);
   const [toLocation, setToLocation] = useState<StockLocation | null>(null);
   const [scanPhase, setScanPhase] = useState<"from" | "item" | "to">("from");
   const [items, setItems] = useState<TransferItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarning | null>(null);
 
   async function handleScan(barcode: string) {
     try {
@@ -69,10 +86,7 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
       const stockItems = await getStockForPart(part.pk, fromLocation.pk);
       if (stockItems.length === 0 || stockItems.every((s) => s.quantity <= 0)) {
         playError();
-        onFlash({
-          type: "error",
-          text: `${part.name} 在 ${fromLocation.name} 无库存`,
-        });
+        onFlash({ type: "error", text: `${part.name} 在 ${fromLocation.name} 无库存` });
         return;
       }
 
@@ -85,11 +99,9 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
           onFlash({ type: "warning", text: `库存不足! 可调拨: ${existing.available}` });
           return;
         }
-        setItems(
-          items.map((i) =>
-            i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
-          )
-        );
+        setItems(items.map((i) =>
+          i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
+        ));
       } else {
         setItems([
           {
@@ -108,10 +120,21 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
       onFlash({ type: "success", text: `调拨: ${part.name}` });
     } catch (err) {
       playError();
-      onFlash({
-        type: "error",
-        text: err instanceof Error ? err.message : "扫码失败",
-      });
+      onFlash({ type: "error", text: err instanceof Error ? err.message : "扫码失败" });
+    }
+  }
+
+  // Show warning dialog and wait for user's decision
+  function askDuplicate(item: TransferItem, existingQty: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      setDuplicateWarning({ item, existingQty, resolve });
+    });
+  }
+
+  function handleDuplicateChoice(proceed: boolean) {
+    if (duplicateWarning) {
+      duplicateWarning.resolve(proceed);
+      setDuplicateWarning(null);
     }
   }
 
@@ -134,23 +157,40 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
 
     setSubmitting(true);
     try {
+      // Check each item for duplicates at target location before transferring
+      const itemsToTransfer: TransferItem[] = [];
+      for (const item of items) {
+        const destStock = await getStockForPart(item.part.pk, toLocation.pk);
+        const destQty = destStock.reduce((s, si) => s + si.quantity, 0);
+
+        if (destQty > 0) {
+          const proceed = await askDuplicate(item, destQty);
+          if (!proceed) continue; // User chose to skip this item
+        }
+
+        itemsToTransfer.push(item);
+      }
+
+      if (itemsToTransfer.length === 0) {
+        onFlash({ type: "warning", text: "所有调拨已取消" });
+        return;
+      }
+
       await transferStock(
-        items.map((i) => ({ pk: i.stockItem.pk, quantity: i.quantity })),
+        itemsToTransfer.map((i) => ({ pk: i.stockItem.pk, quantity: i.quantity })),
         toLocation.pk
       );
+
       playSuccess();
       onFlash({
         type: "success",
-        text: `调拨成功! ${items.length} 种商品从 ${fromLocation?.name} 到 ${toLocation.name}`,
+        text: `调拨成功! ${itemsToTransfer.length} 种商品从 ${fromLocation?.name} 到 ${toLocation.name}`,
       });
       setItems([]);
       setScanPhase("from");
     } catch (err) {
       playError();
-      onFlash({
-        type: "error",
-        text: err instanceof Error ? err.message : "调拨失败",
-      });
+      onFlash({ type: "error", text: err instanceof Error ? err.message : "调拨失败" });
     } finally {
       setSubmitting(false);
     }
@@ -165,15 +205,33 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
 
   return (
     <div className="space-y-4">
+      {/* Duplicate warning dialog */}
+      <AlertDialog open={!!duplicateWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>目标库位已有相同产品</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicateWarning?.item.part.name} 在 {toLocation?.name} 已有{" "}
+              {duplicateWarning?.existingQty} 件库存。调拨 {duplicateWarning?.item.quantity} 件后将产生独立库存条目（共 2 条）。继续调拨，或取消跳过该商品？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => handleDuplicateChoice(false)}>
+              跳过此商品
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleDuplicateChoice(true)}>
+              继续调拨
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="text-sm text-muted-foreground font-medium">{phaseHint}</div>
 
       <div className="grid grid-cols-2 gap-3">
         <LocationSelect
           value={fromLocation?.pk}
-          onChange={(loc) => {
-            setFromLocation(loc);
-            setScanPhase("item");
-          }}
+          onChange={(loc) => { setFromLocation(loc); setScanPhase("item"); }}
           label="来源库位"
         />
         <LocationSelect
@@ -191,22 +249,15 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
 
       <Card>
         <CardHeader className="py-3 px-4">
-          <CardTitle className="text-base">
-            待调拨 ({items.length} 种)
-          </CardTitle>
+          <CardTitle className="text-base">待调拨 ({items.length} 种)</CardTitle>
         </CardHeader>
         {items.length > 0 && (
           <CardContent className="px-4 pb-4 pt-0">
             <div className="space-y-2">
               {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-2 py-2 border-b last:border-0"
-                >
+                <div key={item.id} className="flex items-center gap-2 py-2 border-b last:border-0">
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">
-                      {item.part.name}
-                    </div>
+                    <div className="font-medium text-sm truncate">{item.part.name}</div>
                     <div className="text-xs text-muted-foreground font-mono">
                       {item.part.IPN} (可用: {item.available})
                     </div>
@@ -241,7 +292,7 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
               onClick={handleSubmit}
               disabled={submitting || !toLocation}
             >
-              {submitting ? "提交中..." : `确认调拨 (${items.reduce((s, i) => s + i.quantity, 0)} 件)`}
+              {submitting ? "处理中..." : `确认调拨 (${items.reduce((s, i) => s + i.quantity, 0)} 件)`}
             </Button>
           </CardContent>
         )}
