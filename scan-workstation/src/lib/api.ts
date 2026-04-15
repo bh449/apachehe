@@ -112,7 +112,7 @@ export async function getStockForPart(
   partPk: number,
   locationPk?: number
 ): Promise<StockItem[]> {
-  let url = `/stock/?part=${partPk}&limit=100`;
+  let url = `/stock/?part=${partPk}&limit=100&location_detail=true&part_detail=true`;
   if (locationPk) url += `&location=${locationPk}`;
   const data = await request<StockItem[] | { results: StockItem[] }>(url);
   return Array.isArray(data) ? data : data.results;
