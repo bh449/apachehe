@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block page_title %}快速搜索{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 800px; margin: 0 auto; padding: 24px 16px;">
+
+  <h4 class="mb-3">
+    <i class="fas fa-search"></i> 快速搜索产品
+  </h4>
+
+  <!-- Search input -->
+  <div class="input-group mb-3" style="max-width: 600px;">
+    <input
+      type="text"
+      id="searchInput"
+      class="form-control form-control-lg"
+      placeholder="输入 IPN、UPC 条码或产品名称..."
+      autofocus
+      autocomplete="off"
+    />
+    <button class="btn btn-primary" onclick="doSearch()">
+      <i class="fas fa-search"></i> 搜索
+    </button>
+    <button class="btn btn-outline-secondary" onclick="clearSearch()">清空</button>
+  </div>
+
+  <div id="searchStatus" class="text-muted small mb-2"></div>
+
+  <!-- Results area -->
+  <div id="results"></div>
+
+</div>
+
+<script>
+  const input = document.getElementById('searchInput');
+  const resultsDiv = document.getElementById('results');
+  const statusDiv = document.getElementById('searchStatus');
+  let debounceTimer = null;
+
+  // Debounce on typing
+  input.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    const q = this.value.trim();
+    if (!q) { clearSearch(); return; }
+    debounceTimer = setTimeout(() => doSearch(), 350);
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { clearTimeout(debounceTimer); doSearch(); }
+    if (e.key === 'Escape') { clearSearch(); }
+  });
+
+  async function apiGet(url) {
+    const resp = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'X-CSRFToken': getCookie('csrftoken') }
+    });
+    if (!resp.ok) throw new Error('API error ' + resp.status);
+    return resp.json();
+  }
+
+  async function apiPost(url, body) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify(body)
+    });
+    return resp.json();
+  }
+
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return '';
+  }
+
+  async function doSearch() {
+    const q = input.value.trim();
+    if (!q) return;
+
+    statusDiv.textContent = '搜索中...';
+    resultsDiv.innerHTML = '';
+
+    let parts = [];
+
+    try {
+      // 1. Try barcode scan
+      try {
+        const bc = await apiPost('/api/barcode/', { barcode: q });
+        if (bc.part && bc.part.instance) {
+          parts = [bc.part.instance];
+        }
+      } catch(e) {}
+
+      // 2. Try exact IPN
+      if (!parts.length) {
+        const r = await apiGet(`/api/part/?IPN=${encodeURIComponent(q)}&limit=1`);
+        const res = r.results || r;
+        if (res.length) parts = res;
+      }
+
+      // 3. Try name/keyword search
+      if (!parts.length) {
+        const r = await apiGet(`/api/part/?search=${encodeURIComponent(q)}&limit=20&active=true`);
+        parts = r.results || r;
+      }
+
+      if (!parts.length) {
+        statusDiv.textContent = `未找到与 "${q}" 相关的产品`;
+        return;
+      }
+
+      statusDiv.textContent = `找到 ${parts.length} 个产品`;
+      renderResults(parts);
+
+    } catch(e) {
+      statusDiv.textContent = '搜索出错: ' + e.message;
+    }
+  }
+
+  async function renderResults(parts) {
+    // For each part, fetch stock summary
+    const html = await Promise.all(parts.map(async (p) => {
+      let stockHtml = '';
+      try {
+        const stock = await apiGet(`/api/stock/?part=${p.pk}&limit=50&location_detail=true`);
+        const items = stock.results || stock;
+
+        // Group by location
+        const byLoc = {};
+        items.forEach(s => {
+          const key = s.location || 'none';
+          const name = s.location_detail ? (s.location_detail.pathstring || s.location_detail.name) : '未分配';
+          if (!byLoc[key]) byLoc[key] = { name, qty: 0 };
+          byLoc[key].qty += parseFloat(s.quantity);
+        });
+
+        const total = Object.values(byLoc).reduce((s, v) => s + v.qty, 0);
+        const isLow = p.minimum_stock > 0 && total <= p.minimum_stock;
+        const badgeClass = isLow ? 'bg-danger' : 'bg-secondary';
+
+        const locBadges = Object.values(byLoc).map(l =>
+          `<span class="badge bg-light text-dark border me-1">${l.name.split('/').pop()}: ${l.qty}</span>`
+        ).join('');
+
+        stockHtml = `
+          <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+            <span class="badge ${badgeClass} fs-6 px-3">${total} ${p.units || 'pcs'}</span>
+            ${isLow ? '<span class="badge bg-warning text-dark">⚠ 低于安全库存</span>' : ''}
+            ${locBadges}
+          </div>`;
+      } catch(e) {
+        stockHtml = '<span class="text-muted small">库存查询失败</span>';
+      }
+
+      return `
+        <div class="card mb-3 shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h6 class="card-title mb-1">
+                  <a href="/web/part/${p.pk}" class="text-decoration-none fw-semibold fs-5">${p.name}</a>
+                </h6>
+                <div class="d-flex gap-2 align-items-center flex-wrap">
+                  <code class="text-muted small">${p.IPN || '—'}</code>
+                  ${p.category_name ? `<span class="badge bg-light text-dark border">${p.category_name}</span>` : ''}
+                  ${!p.active ? '<span class="badge bg-secondary">已停用</span>' : ''}
+                </div>
+                ${p.description ? `<p class="text-muted small mb-0 mt-1">${p.description}</p>` : ''}
+              </div>
+              <a href="/web/part/${p.pk}" class="btn btn-sm btn-outline-primary ms-2 text-nowrap">
+                <i class="fas fa-arrow-right"></i> 查看详情
+              </a>
+            </div>
+            ${stockHtml}
+          </div>
+        </div>`;
+    }));
+
+    resultsDiv.innerHTML = html.join('');
+  }
+
+  function clearSearch() {
+    input.value = '';
+    resultsDiv.innerHTML = '';
+    statusDiv.textContent = '';
+    input.focus();
+  }
+</script>
+{% endblock %}

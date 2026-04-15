@@ -1,0 +1,1 @@
+from .quick_search_plugin import QuickSearchPlugin
