@@ -172,6 +172,34 @@ export async function transferStock(
   });
 }
 
+/**
+ * Merge-transfer: move N units from source stock item to an existing
+ * destination stock item (instead of creating a new entry).
+ *
+ * Implemented as: removeStock(source, N) + addStock(dest, N)
+ * This keeps both stock items intact but shifts the quantity.
+ */
+export async function mergeTransferStock(
+  sourceStockPk: number,
+  destStockPk: number,
+  quantity: number
+): Promise<void> {
+  await request("/stock/remove/", {
+    method: "POST",
+    body: JSON.stringify({
+      items: [{ pk: sourceStockPk, quantity }],
+      notes: "Transfer (merge) via Scan Workstation",
+    }),
+  });
+  await request("/stock/add/", {
+    method: "POST",
+    body: JSON.stringify({
+      items: [{ pk: destStockPk, quantity }],
+      notes: "Transfer (merge) via Scan Workstation",
+    }),
+  });
+}
+
 export async function countStock(
   items: Array<{ pk: number; quantity: number }>
 ): Promise<void> {

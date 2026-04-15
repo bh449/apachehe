@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ScanInput } from "./scan-input";
 import { LocationSelect } from "./location-select";
-import { scanBarcode, getStockForPart, transferStock } from "@/lib/api";
+import { scanBarcode, getStockForPart, transferStock, mergeTransferStock } from "@/lib/api";
 import { playSuccess, playError, playWarning, playScanAck } from "@/lib/sounds";
 import type { Part, StockLocation, StockItem, FlashMessage } from "@/lib/types";
 
@@ -33,10 +33,13 @@ interface ModeTransferProps {
   onFlash: (msg: FlashMessage) => void;
 }
 
+type DuplicateChoice = "merge" | "separate" | "skip";
+
 interface DuplicateWarning {
   item: TransferItem;
+  existingStock: StockItem[];
   existingQty: number;
-  resolve: (proceed: boolean) => void;
+  resolve: (choice: DuplicateChoice) => void;
 }
 
 export function ModeTransfer({ onFlash }: ModeTransferProps) {
@@ -124,16 +127,17 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
     }
   }
 
-  // Show warning dialog and wait for user's decision
-  function askDuplicate(item: TransferItem, existingQty: number): Promise<boolean> {
+  // Show merge dialog and wait for user's 3-way choice
+  function askDuplicate(item: TransferItem, existingStock: StockItem[]): Promise<DuplicateChoice> {
+    const existingQty = existingStock.reduce((s, si) => s + si.quantity, 0);
     return new Promise((resolve) => {
-      setDuplicateWarning({ item, existingQty, resolve });
+      setDuplicateWarning({ item, existingStock, existingQty, resolve });
     });
   }
 
-  function handleDuplicateChoice(proceed: boolean) {
+  function handleDuplicateChoice(choice: DuplicateChoice) {
     if (duplicateWarning) {
-      duplicateWarning.resolve(proceed);
+      duplicateWarning.resolve(choice);
       setDuplicateWarning(null);
     }
   }
@@ -157,34 +161,41 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
 
     setSubmitting(true);
     try {
-      // Check each item for duplicates at target location before transferring
-      const itemsToTransfer: TransferItem[] = [];
+      // Check each item for duplicates at target location, then act on choice
+      const itemsForNormalTransfer: TransferItem[] = [];
+
       for (const item of items) {
         const destStock = await getStockForPart(item.part.pk, toLocation.pk);
         const destQty = destStock.reduce((s, si) => s + si.quantity, 0);
 
         if (destQty > 0) {
-          const proceed = await askDuplicate(item, destQty);
-          if (!proceed) continue; // User chose to skip this item
+          const choice = await askDuplicate(item, destStock);
+
+          if (choice === "skip") continue;
+
+          if (choice === "merge") {
+            // remove from source, add to first dest stock item
+            const destItem = destStock[0];
+            await mergeTransferStock(item.stockItem.pk, destItem.pk, item.quantity);
+            continue; // handled, skip normal transfer
+          }
+          // choice === "separate": fall through to normal transfer
         }
 
-        itemsToTransfer.push(item);
+        itemsForNormalTransfer.push(item);
       }
 
-      if (itemsToTransfer.length === 0) {
-        onFlash({ type: "warning", text: "所有调拨已取消" });
-        return;
+      if (itemsForNormalTransfer.length > 0) {
+        await transferStock(
+          itemsForNormalTransfer.map((i) => ({ pk: i.stockItem.pk, quantity: i.quantity })),
+          toLocation.pk
+        );
       }
-
-      await transferStock(
-        itemsToTransfer.map((i) => ({ pk: i.stockItem.pk, quantity: i.quantity })),
-        toLocation.pk
-      );
 
       playSuccess();
       onFlash({
         type: "success",
-        text: `调拨成功! ${itemsToTransfer.length} 种商品从 ${fromLocation?.name} 到 ${toLocation.name}`,
+        text: `调拨成功! ${items.length} 种商品从 ${fromLocation?.name} 到 ${toLocation.name}`,
       });
       setItems([]);
       setScanPhase("from");
@@ -205,22 +216,37 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
 
   return (
     <div className="space-y-4">
-      {/* Duplicate warning dialog */}
+      {/* Duplicate warning dialog — 3-way choice */}
       <AlertDialog open={!!duplicateWarning}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>目标库位已有相同产品</AlertDialogTitle>
             <AlertDialogDescription>
               {duplicateWarning?.item.part.name} 在 {toLocation?.name} 已有{" "}
-              {duplicateWarning?.existingQty} 件库存。调拨 {duplicateWarning?.item.quantity} 件后将产生独立库存条目（共 2 条）。继续调拨，或取消跳过该商品？
+              {duplicateWarning?.existingQty} 件，本次调拨{" "}
+              {duplicateWarning?.item.quantity} 件。请选择处理方式：
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => handleDuplicateChoice(false)}>
-              跳过此商品
+          <div className="px-6 pb-2 space-y-2 text-sm">
+            <div className="rounded-md border p-3 space-y-1">
+              <p>• <span className="font-medium">合并</span>：数量叠加到目标库位已有库存 → 共{" "}
+                {(duplicateWarning?.existingQty ?? 0) + (duplicateWarning?.item.quantity ?? 0)} 件，保持 1 条记录</p>
+              <p>• <span className="font-medium">独立</span>：在目标库位新建独立条目 → 产生 2 条记录</p>
+              <p>• <span className="font-medium">跳过</span>：不调拨此商品</p>
+            </div>
+          </div>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel onClick={() => handleDuplicateChoice("skip")}>
+              跳过
             </AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleDuplicateChoice(true)}>
-              继续调拨
+            <AlertDialogAction
+              className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              onClick={() => handleDuplicateChoice("separate")}
+            >
+              独立调拨
+            </AlertDialogAction>
+            <AlertDialogAction onClick={() => handleDuplicateChoice("merge")}>
+              合并调拨
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
