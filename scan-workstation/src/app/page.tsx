@@ -7,6 +7,7 @@ import { ModeInbound } from "@/components/mode-inbound";
 import { ModeOutbound } from "@/components/mode-outbound";
 import { ModeTransfer } from "@/components/mode-transfer";
 import { ModeStocktake } from "@/components/mode-stocktake";
+import { QuickSearch } from "@/components/quick-search";
 import { toast } from "sonner";
 import type { ScanMode, FlashMessage } from "@/lib/types";
 
@@ -52,6 +53,11 @@ export default function ScanWorkstation() {
       </header>
 
       <main className="max-w-2xl mx-auto p-4">
+        {/* Global quick search — always visible */}
+        <div className="mb-4">
+          <QuickSearch />
+        </div>
+
         <Tabs
           value={mode}
           onValueChange={(v) => setMode(v as ScanMode)}
