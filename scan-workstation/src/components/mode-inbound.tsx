@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ScanInput } from "./scan-input";
 import { LocationSelect } from "./location-select";
-import { scanBarcode, createStockItem, getStockForPart, addStock } from "@/lib/api";
+import { scanBarcode, createStockItem, getStockForPart, addStock, validateStockItem } from "@/lib/api";
 import { playSuccess, playError, playScanAck } from "@/lib/sounds";
 import type { Part, StockItem, StockLocation, ScanLineItem, FlashMessage } from "@/lib/types";
 
@@ -127,6 +127,7 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
     setSubmitting(true);
     try {
       for (const item of items) {
+        // Re-fetch to get fresh stock state; avoids stale pk errors
         const existingStock = await getStockForPart(item.part.pk, location.pk);
         const hasExisting = existingStock.length > 0;
 
@@ -137,7 +138,8 @@ export function ModeInbound({ onFlash }: ModeInboundProps) {
         }
 
         if (hasExisting && shouldMerge) {
-          // Add quantity to the first existing stock item at this location
+          // Validate the target stock item still exists before merging
+          await validateStockItem(existingStock[0].pk);
           await addStock([{ pk: existingStock[0].pk, quantity: item.quantity }]);
         } else {
           // Create a new stock item (even if one already exists)

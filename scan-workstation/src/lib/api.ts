@@ -24,18 +24,75 @@ async function request<T>(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "Unknown error");
-    let message = `API Error ${res.status}`;
+    const text = await res.text().catch(() => "");
+    let message = `请求失败 (${res.status})`;
     try {
       const json = JSON.parse(text);
-      message = json.detail || json.error || JSON.stringify(json);
+      message = parseApiError(json);
     } catch {
-      message = text || message;
+      if (text) message = text;
     }
     throw new Error(message);
   }
 
   return res.json();
+}
+
+/** Convert InvenTree's structured error JSON into a human-readable string. */
+function parseApiError(json: unknown): string {
+  if (typeof json === "string") return json;
+  if (typeof json !== "object" || json === null) return "未知错误";
+
+  const obj = json as Record<string, unknown>;
+
+  // Top-level "detail" or "error"
+  if (typeof obj.detail === "string") return obj.detail;
+  if (typeof obj.error === "string") return obj.error;
+
+  // items array errors: { items: [ { pk: ["Invalid pk..."] } ] }
+  if (Array.isArray(obj.items)) {
+    for (const item of obj.items) {
+      if (item && typeof item === "object") {
+        const itemObj = item as Record<string, unknown>;
+        if (Array.isArray(itemObj.pk)) {
+          const msg = itemObj.pk[0];
+          if (typeof msg === "string" && msg.includes("does not exist")) {
+            return "库存条目已不存在（可能已被合并或删除），请重新扫描商品刷新数据";
+          }
+          return `库存条目错误: ${itemObj.pk[0]}`;
+        }
+        // Any other field errors
+        for (const [field, errors] of Object.entries(itemObj)) {
+          if (Array.isArray(errors) && errors.length > 0) {
+            return `字段 "${field}" 错误: ${errors[0]}`;
+          }
+        }
+      }
+    }
+  }
+
+  // Generic field errors
+  for (const [field, errors] of Object.entries(obj)) {
+    if (Array.isArray(errors) && errors.length > 0) {
+      return `${field}: ${errors[0]}`;
+    }
+  }
+
+  return JSON.stringify(json);
+}
+
+/**
+ * Verify a stock item pk still exists before a mutation.
+ * Throws a user-friendly error if it doesn't.
+ */
+export async function validateStockItem(pk: number): Promise<StockItem> {
+  try {
+    return await request<StockItem>(`/stock/${pk}/`);
+  } catch {
+    throw new Error(
+      `库存条目 #${pk} 已不存在（可能已被合并或删除）。请清空列表，重新扫描商品后再操作。`
+    );
+  }
 }
 
 // --- Barcode ---

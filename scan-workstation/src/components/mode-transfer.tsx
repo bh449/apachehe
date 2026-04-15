@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ScanInput } from "./scan-input";
 import { LocationSelect } from "./location-select";
-import { scanBarcode, getStockForPart, transferStock, mergeTransferStock } from "@/lib/api";
+import { scanBarcode, getStockForPart, transferStock, mergeTransferStock, validateStockItem } from "@/lib/api";
 import { playSuccess, playError, playWarning, playScanAck } from "@/lib/sounds";
 import type { Part, StockLocation, StockItem, FlashMessage } from "@/lib/types";
 
@@ -174,8 +174,10 @@ export function ModeTransfer({ onFlash }: ModeTransferProps) {
           if (choice === "skip") continue;
 
           if (choice === "merge") {
-            // remove from source, add to first dest stock item
+            // Validate both stock items still exist before merge
+            await validateStockItem(item.stockItem.pk);
             const destItem = destStock[0];
+            await validateStockItem(destItem.pk);
             await mergeTransferStock(item.stockItem.pk, destItem.pk, item.quantity);
             continue; // handled, skip normal transfer
           }
