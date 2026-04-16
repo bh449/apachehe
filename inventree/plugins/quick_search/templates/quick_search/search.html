@@ -39,6 +39,14 @@
   const statusDiv = document.getElementById('searchStatus');
   let debounceTimer = null;
 
+  // Pre-fill from ?q= URL parameter (set when coming from Cmd+K spotlight)
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialQuery = urlParams.get('q') || '';
+  if (initialQuery) {
+    input.value = initialQuery;
+    setTimeout(() => doSearch(), 100);
+  }
+
   // Debounce on typing
   input.addEventListener('input', function() {
     clearTimeout(debounceTimer);
