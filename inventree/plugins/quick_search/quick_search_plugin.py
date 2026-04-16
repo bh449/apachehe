@@ -1,6 +1,6 @@
 """
 Quick Search Plugin for InvenTree
-Adds a sidebar navigation item, Cmd+K spotlight action, and search page
+Adds a dashboard search widget and Cmd+K spotlight action
 to find parts by IPN, UPC barcode or name.
 Compatible with InvenTree 1.x (React PUI).
 """
@@ -17,18 +17,20 @@ class QuickSearchPlugin(UserInterfaceMixin, UrlsMixin, InvenTreePlugin):
     SLUG = "quick-search"
     TITLE = "快速搜索"
     DESCRIPTION = "通过 IPN、UPC 条码或产品名快速定位产品"
-    VERSION = "1.2.0"
+    VERSION = "1.3.0"
     AUTHOR = "Mini ERP"
 
-    # ── Sidebar navigation item (React PUI sidebar) ─────────────────────────
-    def get_ui_navigation_items(self, request, context, **kwargs):
-        """Inject a navigation item into the React UI sidebar."""
+    # ── Dashboard search widget (InvenTree home page) ───────────────────────
+    def get_ui_dashboard_items(self, request, context, **kwargs):
+        """Add a search widget to the InvenTree dashboard."""
         return [
             {
-                "key": "quick-search-nav",
-                "title": "快速搜索",
+                "key": "quick-search-dashboard",
+                "title": "快速搜索产品",
+                "description": "通过 IPN、UPC 条码或产品名称快速搜索",
                 "icon": "ti:search:outline",
-                "options": {"url": "/plugin/quick-search/search/"},
+                "source": "/static/plugins/quick-search/quick_search_dashboard.js",
+                "options": {"width": 6, "height": 3},
             }
         ]
 
@@ -41,12 +43,11 @@ class QuickSearchPlugin(UserInterfaceMixin, UrlsMixin, InvenTreePlugin):
                 "title": "快速搜索产品",
                 "description": "按 IPN、UPC 条码或产品名称搜索",
                 "icon": "ti:search:outline",
-                # Static file — no auth required, loadable as an ES module
                 "source": "/static/plugins/quick-search/quick_search_action.js:performQuickSearch",
             }
         ]
 
-    # ── URL routes ───────────────────────────────────────────────────────────
+    # ── URL routes (standalone search page for Cmd+K landing) ────────────────
     def setup_urls(self):
         return [
             re_path(r"^search/?$", self.search_view, name="search"),
