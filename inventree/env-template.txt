@@ -52,3 +52,12 @@ INVENTREE_USE_X_FORWARDED_PROTO=True
 
 # --- Gunicorn ---
 INVENTREE_GUNICORN_TIMEOUT=90
+
+# --- Scan Workstation ---
+# API token for scan-workstation → InvenTree communication
+# Generate at: InvenTree > Admin > API Tokens, or via API: GET /api/user/token/
+INVENTREE_TOKEN=
+
+# --- LAN / Remote Access ---
+# Add your LAN IP and/or Tailscale hostname here (comma-separated if multiple)
+# INVENTREE_TRUSTED_ORIGINS=http://192.168.x.x:1880

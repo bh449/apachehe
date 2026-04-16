@@ -36,6 +36,11 @@
         file_server
     }
 
+    # Scan Workstation (Next.js) — /scan and /scan/*
+    handle /scan* {
+        reverse_proxy scan-workstation:3000
+    }
+
     # All other requests -> InvenTree
     handle {
         reverse_proxy inventree-server:8000
