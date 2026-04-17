@@ -182,28 +182,38 @@ export function ModeOutbound({ onFlash }: ModeOutboundProps) {
         </CardHeader>
         {items.length > 0 && (
           <CardContent className="px-4 pb-4 pt-0">
-            <div className="space-y-2">
+            <div className="space-y-1">
               {items.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center gap-2 py-2 border-b last:border-0"
+                  className="py-3 border-b last:border-0 space-y-2"
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">
-                      {item.part.name}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-sm leading-tight">
+                        {item.part.name}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        <span className="font-mono">{item.part.IPN}</span>
+                        <span className="ml-2">
+                          可用: {item.available} {item.part.units}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      <span className="font-mono">{item.part.IPN}</span>
-                      <span className="ml-2">
-                        可用: {item.available} {item.part.units}
-                      </span>
-                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-destructive shrink-0"
+                      onClick={() => setItems(items.filter((i) => i.id !== item.id))}
+                    >
+                      x
+                    </Button>
                   </div>
                   <div className="flex items-center gap-1" data-no-refocus>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-8 w-8 p-0"
+                      className="h-9 w-9 p-0 text-lg"
                       onClick={() => updateQuantity(item.id, item.quantity - 1)}
                     >
                       -
@@ -214,27 +224,19 @@ export function ModeOutbound({ onFlash }: ModeOutboundProps) {
                       onChange={(e) =>
                         updateQuantity(item.id, Number(e.target.value))
                       }
-                      className="h-8 w-16 text-center"
+                      className="h-9 w-16 text-center text-base"
                       min={1}
                       max={item.available}
                     />
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-8 w-8 p-0"
+                      className="h-9 w-9 p-0 text-lg"
                       onClick={() => updateQuantity(item.id, item.quantity + 1)}
                     >
                       +
                     </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-destructive"
-                    onClick={() => setItems(items.filter((i) => i.id !== item.id))}
-                  >
-                    x
-                  </Button>
                 </div>
               ))}
             </div>
