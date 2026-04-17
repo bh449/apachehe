@@ -164,64 +164,68 @@ export function ModeStocktake({ onFlash }: ModeStocktakeProps) {
         </CardHeader>
         {items.length > 0 && (
           <CardContent className="px-4 pb-4 pt-0">
-            <div className="space-y-2">
+            <div className="space-y-1">
               {items.map((item) => {
                 const diff = item.countedQty - item.systemQty;
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center gap-2 py-2 border-b last:border-0"
+                    className="py-3 border-b last:border-0 space-y-2"
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">
-                        {item.part.name}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-sm leading-tight">
+                          {item.part.name}
+                        </div>
+                        <div className="text-xs text-muted-foreground font-mono mt-0.5">
+                          {item.part.IPN}
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        {item.part.IPN}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-destructive shrink-0"
+                        onClick={() =>
+                          setItems(items.filter((i) => i.id !== item.id))
+                        }
+                      >
+                        x
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-3" data-no-refocus>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        系统: {item.systemQty}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground">实盘:</span>
+                        <Input
+                          type="number"
+                          value={item.countedQty}
+                          onChange={(e) => {
+                            const qty = Math.max(0, Number(e.target.value));
+                            setItems(
+                              items.map((i) =>
+                                i.id === item.id ? { ...i, countedQty: qty } : i
+                              )
+                            );
+                          }}
+                          className="h-9 w-16 text-center text-base"
+                          min={0}
+                        />
                       </div>
+                      <Badge
+                        variant={
+                          diff === 0
+                            ? "secondary"
+                            : diff > 0
+                              ? "default"
+                              : "destructive"
+                        }
+                        className="min-w-[3rem] justify-center"
+                      >
+                        {diff > 0 ? `+${diff}` : diff}
+                      </Badge>
                     </div>
-                    <div className="text-xs text-muted-foreground text-right">
-                      <div>系统: {item.systemQty}</div>
-                    </div>
-                    <div className="flex items-center gap-1" data-no-refocus>
-                      <span className="text-xs text-muted-foreground">实盘:</span>
-                      <Input
-                        type="number"
-                        value={item.countedQty}
-                        onChange={(e) => {
-                          const qty = Math.max(0, Number(e.target.value));
-                          setItems(
-                            items.map((i) =>
-                              i.id === item.id ? { ...i, countedQty: qty } : i
-                            )
-                          );
-                        }}
-                        className="h-8 w-16 text-center"
-                        min={0}
-                      />
-                    </div>
-                    <Badge
-                      variant={
-                        diff === 0
-                          ? "secondary"
-                          : diff > 0
-                            ? "default"
-                            : "destructive"
-                      }
-                      className="min-w-[3rem] justify-center"
-                    >
-                      {diff > 0 ? `+${diff}` : diff}
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-destructive"
-                      onClick={() =>
-                        setItems(items.filter((i) => i.id !== item.id))
-                      }
-                    >
-                      x
-                    </Button>
                   </div>
                 );
               })}

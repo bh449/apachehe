@@ -8,7 +8,7 @@ import type {
   RawBarcodeScanResult,
 } from "./types";
 
-const API_BASE = "/api/inventree";
+const API_BASE = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/inventree`;
 
 async function request<T>(
   endpoint: string,
@@ -98,6 +98,30 @@ export async function validateStockItem(pk: number): Promise<StockItem> {
 // --- Barcode ---
 
 export async function scanBarcode(barcode: string): Promise<BarcodeScanResult> {
+  // Try the barcode as-is first
+  const result = await tryScanBarcode(barcode);
+  if (result.success) return result;
+
+  // UPC-A (12 digits) ↔ EAN-13 (13 digits) auto-conversion:
+  // Many barcode scanners return UPC-A as EAN-13 by prepending "0".
+  // If the first attempt failed, try the alternate format.
+  const alt = upcEanAlternate(barcode);
+  if (alt) {
+    const altResult = await tryScanBarcode(alt);
+    if (altResult.success) return altResult;
+  }
+
+  return result; // Return the original error
+}
+
+/** If barcode is 12-digit UPC-A, return 13-digit EAN-13 (prepend 0), and vice versa */
+function upcEanAlternate(barcode: string): string | null {
+  if (/^\d{12}$/.test(barcode)) return "0" + barcode;          // UPC-A → EAN-13
+  if (/^0\d{12}$/.test(barcode)) return barcode.substring(1);  // EAN-13 → UPC-A
+  return null;
+}
+
+async function tryScanBarcode(barcode: string): Promise<BarcodeScanResult> {
   // InvenTree barcode API returns nested refs: { part: { pk, instance: Part } }
   // We normalize to flat structure so components can use result.part.name directly
   const raw = await request<RawBarcodeScanResult>("/barcode/", {
